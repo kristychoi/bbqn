@@ -11,13 +11,16 @@ import torch
 import logging
 # import argparse
 from models.linear_models import *
+from models.dqn_model import DQN
 from learn import learn, OptimizerSpec
 import utils
 # from utils.tf_wrapper import GatedPixelCNNWrapper, FLAGS
-# from utils.gym_atari_wrappers import get_env, get_wrapper_by_name
+from utils.gym_atari_wrappers import get_env, get_wrapper_by_name
 from utils.schedule import LinearSchedule
+# todo: could probably do a smarter config selection scheme
 # from config.chain_config import Config
-from config.grid_config import Config
+# from config.grid_config import Config
+from config.dqn_config import Config
 
 
 # do logging
@@ -82,21 +85,30 @@ def main(config, env):
     """
     # FLAGS = update_tf_wrapper_args(args, utils.tf_wrapper.FLAGS)
 
-    # may need this later for Atari
+    # may need this for Atari todo: ask about how to pull num_timesteps from config
     # def stopping_criterion(env, t):
     #     # t := number of steps of wrapped env
     #     # different from number of steps in underlying env
     #     return get_wrapper_by_name(env, "Monitor").get_total_steps() >= num_timesteps
-    #
+
+    # todo: optimizer --> is there a linearly decaying learning rate schedule?
     # optimizer_spec = OptimizerSpec(
     #     constructor=torch.optim.Adam,
     #     kwargs=dict(lr=config.learning_rate),)
     # , alpha = config.alpha, eps = config.epsilon
 
+    # todo: don't think you actually need this in current implementation
     exploration_schedule = LinearSchedule(1000000, 0.1)
 
+    # get model
+    if config_file.deep:
+        dqn_agent = DQN
+    else:
+        dqn_agent = Linear_DQN
+
+    # train agent
     loss_average, score, sigma_average = learn(
-        model=Linear_DQN,
+        model=dqn_agent,
         env=env,
         config=config
     )
@@ -114,19 +126,18 @@ if __name__ == '__main__':
     # get config file
     config_file = Config()
 
-    # Get Atari games.
-    # benchmark = gym.benchmark_spec('Atari40M')
-    # env_id = 'PongNoFrameskip-v4'
-
-    # Run training
+    # Run training; set seeds for reproducibility
     seed = 1234
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    # downsample image to (42 x 42) for pseudocounts
-    # env = get_env(env_id, seed, config_file.downsample)
-    env = gym.make(config_file.env_name)
+    # get environment
+    if config_file.deep:
+        # this sets up the Atari environment
+        env = get_env(config_file.env_name, seed, config_file.downsample)
+    else:
+        env = gym.make(config_file.env_name)
 
     # if directories don't exist, make them
     if not os.path.exists(config_file.output_path):

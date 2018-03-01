@@ -10,7 +10,11 @@ class Config():
     gamma = 0.999
     max_ep_len = 50
     replay_mem_size = 2**18
+
+    # specific to architecture
     deep = False
+    grad_clip = False
+    downsample = False
 
     num_episodes = 10000
     linear_decay = False

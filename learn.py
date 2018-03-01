@@ -72,14 +72,43 @@ def Q_dump(env, model):
             print(row.contiguous().view(m, m))
 
 
+# todo: should we write a new function for linear learn or just lump everything here?
 def learn(model, env, config):
+    # todo: set up directories to save output
+    # stats_dir = save_dir + 'stats/'
+    # if not os.path.exists(stats_dir):
+    #     os.makedirs(stats_dir)
+    # ckpt_dir = save_dir + 'torch_ckpts/'
+    # if not os.path.exists(ckpt_dir):
+    #     os.makedirs(ckpt_dir)
+    # logging.info('Run statistics will be saved at {}'.format(stats_dir))
+    # logging.info('Q and target networks will be saved at {}'.format(ckpt_dir))
+
     ### todo: Hyperparameters --> put this in config
+    import sys
     RHO_P = 0.0
     STD_DEV_P = math.log1p(math.exp(RHO_P))
 
     # set up model
-    # model = model(env.state_size(), env.action_space.n)
-    model = model(env.env.state_size(), env.action_space.n)
+    if config.deep:
+        # this is just to make sure that you're operating in the correct environment
+        assert type(env.observation_space) == gym.spaces.Box
+        assert type(env.action_space) == gym.spaces.Discrete
+
+        if len(env.observation_space.shape) == 1:
+            # This means we are running on low-dimensional observations (e.g. RAM)
+            input_shape = env.observation_space.shape
+        else:
+            img_h, img_w, img_c = env.observation_space.shape
+            input_shape = (img_h, img_w, config.frame_history_len * img_c)
+        n_actions = env.action_space.n
+        in_channel = input_shape[-1]
+
+        # define model
+        model = model(in_channel, n_actions)
+    else:
+        model = model(env.env.state_size(), env.action_space.n)
+    # use GPU if available
     if USE_CUDA:
         model.cuda()
 
@@ -179,9 +208,16 @@ def learn(model, env, config):
             batch = Transition(*zip(*transitions))
             loss = loss_of_batch(batch)
             loss_list.append(loss.data[0])
+
+            # zero gradients and backprop
             optimizer.zero_grad()
             loss.backward()
-            # nn.utils.clip_grad_norm(model.parameters(), 1.0)
+
+            # clip gradients if desired
+            if config.grad_clip:
+                torch.nn.utils.clip_grad_norm(model.parameters(), 1.0)
+
+            # update parameters
             optimizer.step()
 
         # training in epochs
@@ -213,10 +249,12 @@ def learn(model, env, config):
         env.reset()
 
         # state = Tensor(env.get_state()).unsqueeze(0)
+        # todo: this is where you need the smart buffer and plug it into the model
         state = Tensor(env.env.get_state()).unsqueeze(0)
         iters = 0
         score = 0
-        while iters < config.max_ep_len:
+        # while iters < config.max_ep_len:
+        while iters < 1000: # todo: pull max_ep_len from atari wrapper
             do_update = False
             if iters % config.period_sample == 0:
                 if model.variational():
@@ -230,6 +268,7 @@ def learn(model, env, config):
             # if DQN, do reward clipping
             if config.deep:
                 reward = max(-1.0, min(1.0, reward))
+
             next_state = Tensor(next_state).unsqueeze(0)
             score += reward
             reward = Tensor([reward])
