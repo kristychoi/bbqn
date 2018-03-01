@@ -6,135 +6,36 @@ import gym_gridworld
 import math
 import random
 import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
 from collections import namedtuple, defaultdict
-from itertools import count
-from copy import deepcopy
-from time import time
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 from torch.autograd import Variable
-from models import *
+from utils.naive_replay_buffer import ReplayMemory
+
 
 # if gpu is to be used
-use_cuda = torch.cuda.is_available()
-FloatTensor = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if use_cuda else torch.LongTensor
-ByteTensor = torch.cuda.ByteTensor if use_cuda else torch.ByteTensor
+USE_CUDA = torch.cuda.is_available()
+FloatTensor = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
+LongTensor = torch.cuda.LongTensor if USE_CUDA else torch.LongTensor
+ByteTensor = torch.cuda.ByteTensor if USE_CUDA else torch.ByteTensor
 Tensor = FloatTensor
 
-class Config():
-    env_name = 'gym_onehotgrid-v0'
-    gamma = 0.999
-    max_ep_len = 50
-    replay_mem_size = 2**18
 
-    num_episodes = 5000
-    linear_decay = False
-    train_in_epochs = True
-    if train_in_epochs:
-        num_target_reset = 2
-        period_train_in_epochs = 50
-        num_epochs = 2
-        batch_size = 256
-        period_sample = 5
-        ep_start = 1.0
-        ep_end = 0.01
-        ep_decay = 500
-    else:
-        period_target_reset = 5000
-        batch_size = 32
-        period_sample = 1
-        ep_start = 1.0
-        ep_end = 0.01
-        ep_decay = 500
-    assert ep_start >= ep_end
+OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs"])
 
+Statistic = {
+    "mean_episode_rewards": [],
+    "best_mean_episode_rewards": []
+}
 
-######################################################################
-# Replay Memory
-# -------------
-#
-# We'll be using experience replay memory for training our DQN. It stores
-# the transitions that the agent observes, allowing us to reuse this data
-# later. By sampling from it randomly, the transitions that build up a
-# batch are decorrelated. It has been shown that this greatly stabilizes
-# and improves the DQN training procedure.
-#
-# For this, we're going to need two classses:
-#
-# -  ``Transition`` - a named tuple representing a single transition in
-#    our environment
-# -  ``ReplayMemory`` - a cyclic buffer of bounded size that holds the
-#    transitions observed recently. It also implements a ``.sample()``
-#    method for selecting a random batch of transitions for training.
-#
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
-class ReplayMemory(object):
-
-    def __init__(self, capacity):
-        self.capacity = capacity
-        self.memory = []
-        self.position = 0
-
-    def push(self, *args):
-        """Saves a transition."""
-        if len(self.memory) < self.capacity:
-            self.memory.append(None)
-        self.memory[self.position] = Transition(*args)
-        self.position = (self.position + 1) % self.capacity
-
-    def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
-
-    def shuffle(self):
-        random.shuffle(self.memory)
-
-    def state_action_counts(self):
-        freqs = defaultdict(lambda: defaultdict(int))
-        for transition in self.memory:
-            state = transition.state[0].numpy()
-            state = np.argmax(state)
-            action = transition.action[0,0]
-            freqs[state][action] += 1
-        return freqs
-
-    def __len__(self):
-        return len(self.memory)
-
 steps_done = 0
 effective_eps = 0.0 #for printing purposes
-def select_action(env, model, state):
-    if model.variational():
-        var = Variable(state, volatile=True).type(FloatTensor) 
-        q_sa = model(var).data
-        best_action = q_sa.max(1)[1]
-        return LongTensor([best_action[0]]).view(1, 1)
-    
-    global steps_done
-    sample = random.random()
-    def calc_ep(start, end, decay, t):
-        if config.linear_decay:
-            return start - (float(min(t, decay)) / decay)*(start - end) 
-        else:
-            return end + (start - end)*math.exp(-1.*t /decay)
 
-    eps_threshold = calc_ep(config.ep_start, config.ep_end, config.ep_decay, steps_done)
-    
-    steps_done += 1
-    global effective_eps
-    effective_eps = eps_threshold
-    if sample > eps_threshold:
-        return model(Variable(state, volatile=True).type(FloatTensor)).data.max(1)[1].view(1, 1)
-    else:
-        return LongTensor([[random.randrange(env.num_actions())]])
 
 def get_Q(model, state):
     var = Variable(state, volatile=True).type(FloatTensor)
@@ -143,28 +44,78 @@ def get_Q(model, state):
     else:
         return model(var).data
 
+
 def Q_values(env, model):
-    n = env.state_size()
-    m = int(n ** 0.5)
+    # n = env.state_size()
+    n = env.env.state_size()
     states = np.identity(n)
-    Q = torch.zeros(n, env.num_actions())
+    # Q = torch.zeros(n, env.num_actions())
+    Q = torch.zeros(n, env.env.num_actions())
     for i, row in enumerate(states):
         state = Tensor(row).unsqueeze(0)
         Q[i] = get_Q(model, state)[0]
     return Q
 
+
 def Q_dump(env, model):
-    n = env.state_size()
+    # n = env.state_size()
+    n = env.env.state_size()
     m = int(n ** 0.5)
     Q = Q_values(env, model)
     for i, row in enumerate(Q.t()):
-        print "Action {}".format(i)
-        print row.contiguous().view(m, m)
+        print("Action {}".format(i))
+        # compatibility -- just for now
+        # if len(env.get_state()) == 10:
+        if len(env.env.get_state()) == 10:
+            print(row.contiguous())
+        else:
+            print(row.contiguous().view(m, m))
 
-def simulate(model, env, config):
-    
+
+def learn(model, env, config):
+    ### todo: Hyperparameters --> put this in config
+    RHO_P = 0.0
+    STD_DEV_P = math.log1p(math.exp(RHO_P))
+
+    # set up model
+    # model = model(env.state_size(), env.action_space.n)
+    model = model(env.env.state_size(), env.action_space.n)
+    if USE_CUDA:
+        model.cuda()
+
+    # set up optimizer and replay buffer
     optimizer = optim.Adam(model.parameters())
     memory = ReplayMemory(config.replay_mem_size)
+
+    # define action selection procedure
+    def select_action(env, model, state):
+        if model.variational():
+            var = Variable(state, volatile=True).type(FloatTensor)
+            q_sa = model(var).data
+            best_action = q_sa.max(1)[1]
+            return LongTensor([best_action[0]]).view(1, 1)
+
+        global steps_done
+        sample = random.random()
+
+        def calc_ep(start, end, decay, t):
+            if config.linear_decay:
+                return start - (float(min(t, decay)) / decay) * (start - end)
+            else:
+                return end + (start - end) * math.exp(-1. * t / decay)
+
+        eps_threshold = calc_ep(config.ep_start, config.ep_end, config.ep_decay,
+                                steps_done)
+
+        steps_done += 1
+        global effective_eps
+        effective_eps = eps_threshold
+        if sample > eps_threshold:
+            return model(Variable(state, volatile=True).type(FloatTensor)).data.max(1)[
+                1].view(1, 1)
+        else:
+            # return LongTensor([[random.randrange(env.num_actions())]])
+            return LongTensor([[random.randrange(env.env.num_actions())]])
 
     last_sync = [0] #in an array since py2.7 does not have "nonlocal"
 
@@ -230,9 +181,9 @@ def simulate(model, env, config):
             # nn.utils.clip_grad_norm(model.parameters(), 1.0)
             optimizer.step()
 
-
+        # training in epochs
         if config.train_in_epochs:
-            M = len(memory) / config.batch_size
+            M = int(len(memory) / config.batch_size)
             for target_iter in range(config.num_target_reset):
                 model.save_target()
                 memory.shuffle()
@@ -247,7 +198,7 @@ def simulate(model, env, config):
         else:
             if last_sync[0] % config.period_target_reset == 0:
                 model.save_target()
-                print "Target reset"
+                print("Target reset")
             last_sync[0] += 1
             transitions = memory.sample(config.batch_size)
             M = 1
@@ -257,8 +208,9 @@ def simulate(model, env, config):
     for i_episode in range(config.num_episodes):
         # Initialize the environment and state
         env.reset()
-       
-        state = Tensor(env.get_state()).unsqueeze(0)
+
+        # state = Tensor(env.get_state()).unsqueeze(0)
+        state = Tensor(env.env.get_state()).unsqueeze(0)
         iters = 0
         score = 0
         while iters < config.max_ep_len:
@@ -295,27 +247,14 @@ def simulate(model, env, config):
                 sigma_average_dict[components[idx]].append(average)
         if i_episode % 100 == 0:
             if model.variational():
-                print "Episode: {}\tscore: {}".format(i_episode, score)
+                print("Episode: {}\tscore: {}".format(i_episode, score))
             else:
-                print "Episode: {}\tscore: {}\tepsilon: {}".format(i_episode, score, effective_eps)
+                print("Episode: {}\tscore: {}\tepsilon: {}".format(i_episode, score,
+                                                                   effective_eps))
         if config.train_in_epochs and i_episode % config.period_train_in_epochs == 0:
             optimize_model(model)
 
-    print memory.state_action_counts()
+    print(memory.state_action_counts())
     Q_dump(env, model)
+
     return loss_list, score_list, sigma_average_dict['W']
-
-### Hyperparameters
-RHO_P = 0.0
-STD_DEV_P = math.log1p(math.exp(RHO_P))
-###
-config = Config()
-
-env = gym.make(config.env_name).unwrapped
-models = []
-models.append(Linear_DQN(env.state_size(), env.num_actions()))
-models.append(Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False))
-models.append(Linear_Double_DQN(env.state_size(), env.num_actions()))
-
-for model in models:
-    loss_average, score, sigma_average = simulate(model, env, config)

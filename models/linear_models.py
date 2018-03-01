@@ -1,19 +1,17 @@
-import math
-import random
-import numpy as np
 from copy import deepcopy
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
-from Variational_Linear_Layer import Variational_Linear_Layer
+from models.Variational_Linear_Layer import Variational_Linear_Layer
+
 
 class Linear_DQN(nn.Module):
     def __init__(self, num_features, num_outputs):
         super(Linear_DQN, self).__init__()
         self.head = nn.Linear(num_features, num_outputs, bias=False)
         self.target = None
+        # optional: initialize weights
+        torch.nn.init.xavier_uniform(self.head.weight)
+        # self.fc.weight.data = torch.ones((self.head.weight.shape)).float() * 20.
         
     def variational(self):
         return False
@@ -22,22 +20,24 @@ class Linear_DQN(nn.Module):
         return self.head(x.view(x.size(0), -1))
 
     def save_target(self):
-    	self.target = deepcopy(self.head)
+        self.target = deepcopy(self.head)
 
     def target_value(self, rewards, gamma, states, reset_volatile=True):
-    	assert self.target is not None, "Must call save_target at least once before calculating target_value"
+        assert self.target is not None, "Must call save_target at least once before calculating target_value"
         q_s = self.target(states.view(states.size(0), -1))
         q_sa = q_s.max(1)[0]
         return rewards + gamma * q_sa
 
+
 class Linear_Double_DQN(Linear_DQN):
     def target_value(self, rewards, gamma, states, reset_volatile=True):
-    	assert self.target is not None, "Must call save_target at least once before calculating target_value"
+        assert self.target is not None, "Must call save_target at least once before calculating target_value"
         q_s = self.head(states.view(states.size(0), -1))
         actions = q_s.max(1)[1].view(-1, 1)
         q_s = self.target(states.view(states.size(0), -1))
         q_sa = q_s.gather(1, actions).view(-1)
         return rewards + gamma * q_sa
+
 
 class Linear_BBQN():
     def __init__(self, num_features, num_actions, rho, bias=True):
