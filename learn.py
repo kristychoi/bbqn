@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-
+import sys
 import gym
 import gym_gridworld
 
@@ -9,9 +8,11 @@ import numpy as np
 from collections import namedtuple, defaultdict
 
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 from utils.naive_replay_buffer import ReplayMemory
+from utils.og_replay_buffer import ReplayBuffer
 
 
 # if gpu is to be used
@@ -50,7 +51,7 @@ def Q_values(env, model):
     n = env.env.state_size()
     states = np.identity(n)
     # Q = torch.zeros(n, env.num_actions())
-    Q = torch.zeros(n, env.env.num_actions())
+    Q = torch.zeros(n, env.action_space.n)
     for i, row in enumerate(states):
         state = Tensor(row).unsqueeze(0)
         Q[i] = get_Q(model, state)[0]
@@ -85,11 +86,11 @@ def learn(model, env, config):
     # logging.info('Q and target networks will be saved at {}'.format(ckpt_dir))
 
     ### todo: Hyperparameters --> put this in config
-    import sys
     RHO_P = 0.0
     STD_DEV_P = math.log1p(math.exp(RHO_P))
 
     # set up model
+    n_actions = env.action_space.n
     if config.deep:
         # this is just to make sure that you're operating in the correct environment
         assert type(env.observation_space) == gym.spaces.Box
@@ -101,13 +102,12 @@ def learn(model, env, config):
         else:
             img_h, img_w, img_c = env.observation_space.shape
             input_shape = (img_h, img_w, config.frame_history_len * img_c)
-        n_actions = env.action_space.n
         in_channel = input_shape[-1]
 
         # define model
         model = model(in_channel, n_actions)
     else:
-        model = model(env.env.state_size(), env.action_space.n)
+        model = model(env.env.state_size(), n_actions)
     # use GPU if available
     if USE_CUDA:
         model.cuda()
@@ -143,8 +143,7 @@ def learn(model, env, config):
             return model(Variable(state, volatile=True).type(FloatTensor)).data.max(1)[
                 1].view(1, 1)
         else:
-            # return LongTensor([[random.randrange(env.num_actions())]])
-            return LongTensor([[random.randrange(env.env.num_actions())]])
+            return LongTensor([[random.randrange(n_actions)]])
 
     last_sync = [0] #in an array since py2.7 does not have "nonlocal"
 
@@ -197,8 +196,13 @@ def learn(model, env, config):
             # requires_grad=False
             expected_state_action_values.volatile = False
 
-            loss = (state_action_values - expected_state_action_values).pow(2).sum()
+            # choose appropriate loss
+            if config.deep:
+                loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+            else:
+                loss = (state_action_values - expected_state_action_values).pow(2).sum()
 
+            # account for sample loss if variational model
             if model.variational():
                 loss += loss_of_sample()
 
@@ -246,11 +250,14 @@ def learn(model, env, config):
     score_list = []
     for i_episode in range(config.num_episodes):
         # Initialize the environment and state
-        env.reset()
+        # env.reset()
+        last_obs = env.reset()  # (84,84,1)
 
         # state = Tensor(env.get_state()).unsqueeze(0)
         # todo: this is where you need the smart buffer and plug it into the model
-        state = Tensor(env.env.get_state()).unsqueeze(0)
+        # if you do this, you'll have to recode it and stuff
+        # state = Tensor(env.env.get_state()).unsqueeze(0)
+        state = Tensor(last_obs)
         iters = 0
         score = 0
         # while iters < config.max_ep_len:

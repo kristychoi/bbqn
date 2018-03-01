@@ -1,4 +1,5 @@
 import torch.nn as nn
+from copy import deepcopy
 
 
 class DQN(nn.Module):
@@ -19,6 +20,10 @@ class DQN(nn.Module):
         # cutting down on size for downsampled Atari images
         # self.fc4 = nn.Linear(64, 32)
         # self.fc5 = nn.Linear(32, num_actions)
+
+    def variational(self):
+        # todo: come back and fix this
+        return False
 
     def forward(self, x):
         """
@@ -42,3 +47,14 @@ class DQN(nn.Module):
         out = self.fc5(out)
 
         return out
+
+    def save_target(self):
+        # self.target = deepcopy(self.head)
+        pass
+
+    def target_value(self, rewards, gamma, states, reset_volatile=True):
+        # assert self.target is not None, "Must call save_target at least once before calculating target_value"
+        # q_s = self.target(states.view(states.size(0), -1))
+        # q_sa = q_s.max(1)[0]
+        # return rewards + gamma * q_sa
+        pass
