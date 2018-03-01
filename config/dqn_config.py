@@ -5,10 +5,15 @@ Config file for DQN on Atari 2600 suite
 
 class Config():
     # output config
-    output_path = "/Users/kristyc/Downloads/results/dqn/"
+    output_path = "results/dqn_pong/"
+    # todo: actually do model checkpointing and logging
     model_output = output_path + "model.weights/"
     log_path = output_path + "log.txt"
     plot_output = output_path + "scores.png"
+
+    # environment name
+    env_name = "PongNoFrameskip-v4"
+    deep = True
 
     # model and train config
     grad_clip = True
@@ -18,7 +23,7 @@ class Config():
 
     # hyperparameters
     frame_history_len = 4
-    replay_buffer_size = 1000000
+    replay_mem_size = 1000000
     max_t = 100000  # also adjust max_t here as you start playing with target_update_q
     learning_starts = 50000
     num_iterations = max_t

@@ -151,7 +151,10 @@ def learn(model, env, config):
             action_batch = Variable(torch.cat(batch.action))
             reward_batch = Variable(torch.cat(batch.reward))
             next_states = Variable(torch.cat(batch.next_state), volatile=True)
-
+            # if DQN, normalize state batches
+            if config.deep:
+                state_batch /= 255.0
+                next_states /= 255.0
 
             # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
             # columns of actions taken
@@ -224,6 +227,9 @@ def learn(model, env, config):
             # Select and perform an action
             action = select_action(env, model, state)
             next_state, reward, done, _ = env.step(action[0, 0])
+            # if DQN, do reward clipping
+            if config.deep:
+                reward = max(-1.0, min(1.0, reward))
             next_state = Tensor(next_state).unsqueeze(0)
             score += reward
             reward = Tensor([reward])

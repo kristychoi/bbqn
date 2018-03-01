@@ -16,8 +16,8 @@ import utils
 # from utils.tf_wrapper import GatedPixelCNNWrapper, FLAGS
 # from utils.gym_atari_wrappers import get_env, get_wrapper_by_name
 from utils.schedule import LinearSchedule
-from config.chain_config import Config
-# from config.grid_config import Config
+# from config.chain_config import Config
+from config.grid_config import Config
 
 
 # do logging
@@ -126,7 +126,7 @@ if __name__ == '__main__':
 
     # downsample image to (42 x 42) for pseudocounts
     # env = get_env(env_id, seed, config_file.downsample)
-    env = gym.make('gym_nchain-v0')
+    env = gym.make(config_file.env_name)
 
     # if directories don't exist, make them
     if not os.path.exists(config_file.output_path):

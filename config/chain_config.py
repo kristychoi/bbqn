@@ -14,6 +14,7 @@ class Config():
     gamma = 0.999
     max_ep_len = 50
     replay_mem_size = 2**18
+    deep = False
 
     num_episodes = 5000
     linear_decay = False

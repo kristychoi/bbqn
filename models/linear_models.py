@@ -10,7 +10,7 @@ class Linear_DQN(nn.Module):
         self.head = nn.Linear(num_features, num_outputs, bias=False)
         self.target = None
         # optional: initialize weights
-        torch.nn.init.xavier_uniform(self.head.weight)
+        # torch.nn.init.xavier_uniform(self.head.weight)
         # self.fc.weight.data = torch.ones((self.head.weight.shape)).float() * 20.
         
     def variational(self):
