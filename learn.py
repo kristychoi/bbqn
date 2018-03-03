@@ -175,6 +175,7 @@ def learn(model, env, config):
             
             # We don't want to backprop through the expected action values and volatile
             # will save us on temporarily changing the model parameters' requires_grad to False!
+            # todo: check to see if you need the mask
             state_batch = Variable(torch.cat(batch.state))
             action_batch = Variable(torch.cat(batch.action))
             reward_batch = Variable(torch.cat(batch.reward))
@@ -234,17 +235,31 @@ def learn(model, env, config):
                     for minibatch in range(M):
                         start_idx = minibatch * config.batch_size
                         end_idx = start_idx + config.batch_size
+                        # todo: this is where you sample from the replay buffer
+                        ########################################################
                         transitions = memory.memory[start_idx:end_idx]
                         if model.variational():
                             w_sample = model.sample()
+                        # todo: this is where you update your parameters
                         optimizer_step(transitions)
+                        ########################################################
+                        # # todo: check if you can sample from memory
+                        # # if memory.can_sample(config.batch_size):
+                        # obs_batch, act_batch, rew_batch, next_obs_batch, done_mask, mc_batch = \
+                        #     memory.sample(config.batch_size)
+                        # # todo: maybe you can wrap all of these batches in a transition??
+                        # transitions = None
+                        # optimizer_step(transitions)
         else:
+            # if not training in epochs:
             if last_sync[0] % config.period_target_reset == 0:
                 model.save_target()
                 print("Target reset")
             last_sync[0] += 1
+            # todo: this is where you're sampling from the buffer
             transitions = memory.sample(config.batch_size)
             M = 1
+            # todo: this is where you're updating your parameters
             optimizer_step(transitions)
     
     score_list = []

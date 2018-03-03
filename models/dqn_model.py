@@ -53,8 +53,10 @@ class DQN(nn.Module):
         pass
 
     def target_value(self, rewards, gamma, states, reset_volatile=True):
-        # assert self.target is not None, "Must call save_target at least once before calculating target_value"
-        # q_s = self.target(states.view(states.size(0), -1))
-        # q_sa = q_s.max(1)[0]
-        # return rewards + gamma * q_sa
         pass
+    # def target_value(self, rewards, gamma, not_done_mask, states): # todo
+    #     assert self.target is not None, "Must call save_target at least once before calculating target_value"
+    #     states = not_done_mask * states
+    #     q_s = self.target(states.view(states.size(0), -1))
+    #     q_sa = q_s.max(1)[0]
+    #     return rewards + gamma * q_sa
